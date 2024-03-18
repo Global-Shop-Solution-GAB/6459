@@ -1,0 +1,235 @@
+﻿Program.Sub.Preflight.Start
+v.Global.iBIRunID.Declare
+v.Global.iLogID.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+'report preproc for AR Statements.
+
+
+
+v.Local.sData.Declare
+
+v.Local.sData.Set(v.Passed.DATA-GAB-4)
+F.Intrinsic.Control.CallSub(getData,"DATA",V.Local.sData)
+'f.Intrinsic.Control.CallSub(getData)
+
+Program.Sub.Main.End
+
+Program.Sub.getData.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+v.Local.sData.Declare
+v.Local.sTerminal.Declare
+v.Local.sRPTID.Declare
+v.Local.iCurrent.Declare(Long,0)
+v.Local.i30.Declare(Long,1)
+v.Local.i60.Declare(Long,30)
+v.Local.i90.Declare(Long,60)
+v.Local.sFormula.Declare
+v.Local.sFilter.Declare
+v.Local.iCount.Declare
+v.Local.fTotat.Declare
+v.Local.sColumns.Declare
+v.Local.sTitle1.Declare(String,"Current")
+v.Local.sTitle2.Declare
+v.Local.sTitle3.Declare
+v.Local.sTitle4.Declare
+v.Local.sDate.Declare
+v.Local.sMonth.Declare
+v.Local.sDay.Declare
+v.Local.sYear.Declare
+v.Local.dDate.Declare
+V.Local.fCurrent.Declare
+v.Local.f30.Declare
+v.Local.f60.Declare
+v.Local.f90.Declare
+
+''company options
+''end of current or start of first late period = option 401066,0000,F_LONG
+''description for first late period: 401069,0000, TEXT1
+'f.Global.General.ReadOption("401066",3,0,v.Local.i30)
+f.Global.General.ReadOption("401069",1,"",v.Local.sTitle2)
+
+''end of first late period, start of second late period = option 401067,0000, F_LONG
+''description for 2nd period:  401070, 0000, TEXT1
+'f.Global.General.ReadOption("401067",3,0,v.Local.i60)
+f.Global.General.ReadOption("401070",1,"",v.Local.sTitle3)
+''end of second period, start of third late period = option 401068, 0000, F_LONG
+''description for 3rd period:  401071,0000, TEXT1
+'f.Global.General.ReadOption("401068",3,0,v.Local.i90)
+f.Global.General.ReadOption("401071",1,"",v.Local.sTitle4)
+
+''401072
+''401076
+'f.Global.General.ReadOption("401066",3,0,v.Local.i30)
+'f.Global.General.ReadOption("401069",1,"",v.Local.sTitle2)
+''401073
+''401077
+'f.Global.General.ReadOption("401067",3,0,v.Local.i60)
+'f.Global.General.ReadOption("401070",1,"",v.Local.sTitle3)
+''401074
+''401078
+'f.Global.General.ReadOption("401068",3,0,v.Local.i90)
+'f.Global.General.ReadOption("401071",1,"",v.Local.sTitle4)
+''401075
+''401079
+
+
+
+
+f.Intrinsic.String.Split(v.Args.DATA,"@!@",v.Local.sData)
+f.Intrinsic.String.Split(v.Local.sData(0),"##",v.Local.sTerminal)
+f.Intrinsic.String.Split(v.Local.sData(1),"##",v.Local.sRPTID)
+
+
+
+f.Intrinsic.String.Build("select A.*, (rtrim(ltrim(account)) + '-' + rtrim(ltrim(invoice))) as invKey from laser_ar_stmnt A  where TERMINAL_NO = '{0}' AND RPTID = '{1}' order by key_seq ",v.Local.sTerminal(1),v.Local.sRPTID(1),V.Local.sSql)
+'.................................................
+
+
+F.ODBC.Connection!con.opencompanyconnection(3000)
+
+f.Data.Datatable.CreateFromSQL("statement","con",v.Local.sSql,True)
+f.Data.Datatable.SetPK("statement","terminal_no","rptid","account","key_copy_no","key_seq")
+
+v.Local.sDAte.Set(v.DataTable.statement(0).date!fieldvaltrim)
+f.Intrinsic.String.Build("{0}20{1}",v.Local.sDate.Right4,v.Local.sDate.Left2,v.Local.sDate)
+
+
+f.Intrinsic.Date.ConvertDString(v.Local.sDate,"MM/DD/YYYY",V.Local.dDate)
+
+f.Data.Dictionary.CreateFromSQL("dcInvoices","con","select distinct (rtrim(ltrim(customer)) + '-' + rtrim(ltrim(invoice))) as invKey, DUE_DATE from v_AR_OPEN_ITEMS where batch_code = '10'")
+f.Data.Dictionary.SetDefaultReturn("dcInvoices",v.Local.dDate)
+f.Data.Dictionary.CreateFromSQL("dcOther","con","select distinct (rtrim(ltrim(customer)) + '-' + rtrim(ltrim(invoice))) as invKey, date_transaction from v_AR_OPEN_ITEMS where batch_code <> '10'")
+f.Data.Dictionary.SetDefaultReturn("dcOther",v.Local.dDate)
+
+
+'separate the records in to Invoices, Total Records, and Other (the 'other' records don't have a due date so the don't technically get aged the way invoices do)
+
+f.Data.DataView.Create("statement","dvStatement",22,"tot_marker = 'X'","account asc")
+f.Data.DataView.ToDataTable("statement","dvStatement","dtTotals",True)
+f.Data.DataView.SetFilter("statement","dvStatement","tot_marker <> 'X' and trim(type) = 'Invoice'")
+f.Data.DataView.ToDataTable("statement","dvStatement","dtDetails",True)
+f.Data.DataView.SetFilter("statement","dvStatement","tot_marker <> 'X' and trim(type) <> 'Invoice'")
+f.Data.DataView.ToDataTable("statement","dvStatement","dtOther",True)
+
+
+'adding the date columns to calculate the difference in days.
+f.Data.Datatable.AddColumn("dtDetails","due_date","date")
+f.Data.Datatable.AddColumn("dtDetails","age_date","date",v.Local.dDate)
+f.Data.Datatable.FillFromDictionary("dtDetails","dcInvoices","invKey","due_date")
+f.Data.Datatable.AddColumn("dtOther","due_date","date")
+f.Data.Datatable.AddColumn("dtOther","age_date","date",v.Local.dDate)
+f.Data.Datatable.FillFromDictionary("dtOther","dcOther","invKey","due_date")
+
+f.Data.Datatable.Merge("dtOther","dtDetails","True",2)
+
+f.Data.Datatable.AddColumn("dtDetails","num_days","long")
+f.Data.Datatable.DateDiff("dtDetails","due_date","age_date","d","num_days")
+
+
+'build formula and add new columns
+f.Intrinsic.String.Build("iif(num_days < {0}, iif([charges] <> 0,[charges],[credits]),0)",v.Local.i30,v.Local.sFormula)
+f.Data.Datatable.AddExpressionColumn("dtDetails","new_tot_current","float",v.Local.sFormula)
+f.Intrinsic.String.Build("iif(num_days >= {0} and num_days < {1}, iif([charges] <> 0,[charges],[credits]),0)",v.Local.i30,v.Local.i60,v.Local.sFormula)
+f.Data.Datatable.AddExpressionColumn("dtDetails","new_tot_30","float",v.Local.sFormula)
+f.Intrinsic.String.Build("iif(num_days >= {0} and num_days < {1}, iif([charges] <> 0,[charges],[credits]),0)",v.Local.i60,v.Local.i90,v.Local.sFormula)
+f.Data.Datatable.AddExpressionColumn("dtDetails","new_tot_60","float",v.Local.sFormula)
+f.Intrinsic.String.Build("iif(num_days >= {0}, iif([charges] <> 0,[charges],[credits]),0)",v.Local.i90,v.Local.sFormula)
+f.Data.Datatable.AddExpressionColumn("dtDetails","new_tot_90","float",v.Local.sFormula)
+
+f.Intrinsic.UI.InvokeWaitDialog("Validating aging buckets....","Calculating")
+'there's really no good way re-create the "total_marker" records other than to update the values by getting the sum for each customer
+f.Intrinsic.Control.For(v.Local.iCount,0,v.DataTable.dtTotals.RowCount--,1)
+	f.Intrinsic.UI.ChangeWaitStatus("Validating aging buckets....",v.Local.iCount,0,v.DataTable.dtTotals.RowCount--)
+	f.Intrinsic.String.Build("TRIM(account) = '{0}'",v.DataTable.dtTotals(v.Local.iCount).account!fieldvaltrim,v.Local.sFilter)
+	f.Data.Datatable.Compute("dtDetails","sum(new_tot_current)",v.Local.sFilter,v.Local.fCurrent)
+	f.Data.Datatable.Compute("dtDetails","sum(new_tot_30)",v.Local.sFilter,v.Local.f30)
+	f.Data.Datatable.Compute("dtDetails","sum(new_tot_60)",v.Local.sFilter,v.Local.f60)
+	f.Data.Datatable.Compute("dtDetails","sum(new_tot_90)",v.Local.sFilter,v.Local.f90)
+	f.Data.Datatable.SetValue("dtTotals",v.Local.iCount,"tot_current" ,v.Local.fCurrent,"tot_30",v.Local.f30,"tot_60",v.Local.f60,"tot_90",v.Local.f90)
+	
+
+f.Intrinsic.Control.Next(v.Local.iCount)
+
+f.Data.Datatable.DeleteRow("statement",-1)
+f.Data.Datatable.AcceptChanges("statement")
+
+f.Data.Datatable.Merge("dtDetails","statement",false,2)
+f.Data.Datatable.Merge("dtTotals","statement",false,2)
+
+'f.Data.Datatable.SaveToCSV("dtTotals","c:\apps\global\statement_export.csv",True)
+
+f.Intrinsic.String.Build("delete from laser_ar_stmnt where TERMINAL_NO = '{0}' AND RPTID = '{1}'",v.Local.sTerminal(1),v.Local.sRPTID(1),V.Local.sSql)
+
+f.ODBC.Connection!con.Execute(v.Local.sSql)
+
+'drop the extra columns
+f.Data.Datatable.RemoveColumn("statement","invKey")
+
+f.Data.Datatable.SaveToDB("statement","con","laser_ar_stmnt","terminal_no*!*rptid*!*account*!*key_copy_no*!*key_seq",128,"TERMINAL_NO@!@TERMINAL_NO*!*RPTID@!@RPTID*!*ACCOUNT@!@ACCOUNT*!*KEY_COPY_NO@!@KEY_COPY_NO*!*KEY_SEQ@!@KEY_SEQ*!*DATE@!@DATE*!*BILL_NAME@!@BILL_NAME*!*BILL_ADDRESS1@!@BILL_ADDRESS1*!*BILL_ADDRESS2@!@BILL_ADDRESS2*!*BILL_ADDRESS3@!@BILL_ADDRESS3*!*BILL_ADDRESS4@!@BILL_ADDRESS4*!*BILL_ADDRESS5@!@BILL_ADDRESS5*!*INTL@!@INTL*!*BILL_CITY@!@BILL_CITY*!*BILL_STATE@!@BILL_STATE*!*BILL_ZIP@!@BILL_ZIP*!*BILL_COUNTRY@!@BILL_COUNTRY*!*ATTN@!@ATTN*!*ITEM_DATE@!@ITEM_DATE*!*INVOICE@!@INVOICE*!*TYPE@!@TYPE*!*PO@!@PO*!*FILL_1@!@FILL_1*!*CHARGES@!@CHARGES*!*FILL_2@!@FILL_2*!*CREDITS@!@CREDITS*!*TOT_MARKER@!@TOT_MARKER*!*FILL_3@!@FILL_3*!*TOT_CHGS@!@TOT_CHGS*!*FILL_4@!@FILL_4*!*TOT_CREDITS@!@TOT_CREDITS*!*FILL_5@!@FILL_5*!*TOT_CURRENT@!@TOT_CURRENT*!*FILL_6@!@FILL_6*!*TOT_30@!@TOT_30*!*FILL_7@!@FILL_7*!*TOT_60@!@TOT_60*!*FILL_8@!@FILL_8*!*TOT_90@!@TOT_90*!*FILL_9@!@FILL_9*!*TOT_DUE@!@TOT_DUE*!*PHONE@!@PHONE*!*FAX@!@FAX*!*CURR_SYMBOL@!@CURR_SYMBOL*!*FRM_TEXT_1@!@FRM_TEXT_1*!*FRM_TEXT_2@!@FRM_TEXT_2*!*FRM_TEXT_3@!@FRM_TEXT_3*!*FRM_TEXT_4@!@FRM_TEXT_4*!*COPY_TITLE@!@COPY_TITLE")
+
+f.Intrinsic.UI.CloseWaitDialog
+
+f.ODBC.Connection!con.Close
+
+f.Global.BI.GetRunID(v.Global.iBIRunID)
+
+F.Intrinsic.Control.CallSub(restructureParameters)
+
+f.Global.BI.StartLogging(v.Global.iBIRunID,v.Local.sRPTID.Long,-1,"#REPORT-PATH#\CUSTOM\GCG_6549_AR_Statements.RPT",V.Global.iLogID)
+f.Global.BI.StopLogging(v.Global.iLogID)
+f.Global.BI.RunReportPreProcessor(v.Global.iBIRunID,v.Global.iLogID,v.Args.PARAMS,V.Args.VALUES,"",-1,"False","",-1,"",-1,"","",v.Global.iBIRunID)
+
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.getData.End
+
+Program.Sub.Catching.Start
+v.Local.sError.declare(string)
+F.Intrinsic.String.Build("Project: {0}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}",SCRIPTNAME,V.Ambient.NewLine,v.Args.sub,V.Args.errorno,V.args.errordesc,V.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.Catching.End
+
+Program.Sub.restructureParameters.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sPairs.Declare
+V.Local.sItems.Declare
+v.Local.sParams.Declare
+v.Local.sValues.Declare
+v.Local.iCount.Declare
+
+
+f.Intrinsic.String.Split(v.Passed.DATA-GAB-4,"@!@",V.Local.sPairs)
+
+F.Intrinsic.Control.For(V.Local.iCount,0,V.Local.sPairs.UBound,1)
+
+	F.Intrinsic.String.Split(V.Local.sPairs(V.Local.iCount),"##",v.Local.sItems)
+		f.Intrinsic.Control.If(v.Local.iCount,=,0)
+			f.Intrinsic.String.Build("{0}*!*",v.Local.sItems(0),v.Local.sParams)
+			f.Intrinsic.String.Build("{0}*!*",v.Local.sItems(1),v.Local.sValues)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}*!*{1}",v.Local.sParams,v.Local.sItems(0),v.Local.sParams)
+			f.Intrinsic.String.Build("{0}*!*{1}",v.Local.sValues,v.Local.sItems(1),v.Local.sValues)
+		f.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iCount)
+
+
+f.Intrinsic.Variable.AddRV("params",v.Local.sParams)
+f.Intrinsic.Variable.AddRV("values",v.Local.sValues)
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.restructureParameters.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$dfinch$}$20211027100435745$}$2O16bu3pcn8yPLUxA6F2Klx+ibLK1MdjkS6EY/nCAwydO8+o+SFJBeKaX/cCgV0JBIjBvWpU49Y=
+Program.Sub.Comments.End
